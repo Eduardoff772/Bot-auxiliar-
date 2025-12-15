@@ -1,16 +1,15 @@
-const { 
-  Client, 
-  GatewayIntentBits, 
-  ChannelType, 
-  PermissionsBitField 
+const {
+  Client,
+  GatewayIntentBits,
+  ChannelType
 } = require("discord.js");
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates
   ]
 });
 
@@ -18,59 +17,59 @@ client.once("ready", () => {
   console.log(`Bot online como ${client.user.tag}`);
 });
 
-async function criarPartida(message, tipo, limite) {
+async function criarPartida(message, nome, limite) {
   const guild = message.guild;
 
   const canalTexto = await guild.channels.create({
-    name: `${tipo}-aposta`,
+    name: `${nome}-sala`,
     type: ChannelType.GuildText
   });
 
   const canalVoz = await guild.channels.create({
-    name: `${tipo.toUpperCase()} | Partida`,
+    name: `${nome.toUpperCase()} | Voz`,
     type: ChannelType.GuildVoice
   });
 
+  const jogadores = [];
+
   await canalTexto.send(
-    `🎮 **${tipo.toUpperCase()} criada!**\n` +
-    `👥 Limite: ${limite} jogadores\n` +
-    `Entre em um canal de voz para ser movido automaticamente.`
+    `🎮 **${nome.toUpperCase()} criada**\n` +
+    `Digite **!entrar** estando em um canal de voz\n` +
+    `(${jogadores.length}/${limite})`
   );
 
-  const membros = [];
-
-  const coletor = canalTexto.createMessageCollector({ time: 600000 });
+  const coletor = canalTexto.createMessageCollector({ time: 15 * 60 * 1000 });
 
   coletor.on("collect", async msg => {
     if (msg.content === "!entrar" && msg.member.voice.channel) {
-      if (!membros.includes(msg.member.id)) {
-        membros.push(msg.member.id);
-        await msg.reply(`✅ Entrou (${membros.length}/${limite})`);
+      if (!jogadores.includes(msg.member.id)) {
+        jogadores.push(msg.member.id);
+        await msg.reply(`✅ Entrou (${jogadores.length}/${limite})`);
       }
 
-      if (membros.length === limite) {
+      if (jogadores.length === limite) {
         coletor.stop();
-        for (const id of membros) {
+        for (const id of jogadores) {
           const membro = await guild.members.fetch(id);
           if (membro.voice.channel) {
             membro.voice.setChannel(canalVoz);
           }
         }
-        await canalTexto.send("🚨 Partida fechada!");
+        await canalTexto.send("🔒 Sala fechada!");
       }
     }
   });
 
   coletor.on("end", async () => {
     setTimeout(async () => {
-      await canalTexto.delete();
-      await canalVoz.delete();
-    }, 300000);
+      await canalTexto.delete().catch(() => {});
+      await canalVoz.delete().catch(() => {});
+    }, 5 * 60 * 1000);
   });
 }
 
 client.on("messageCreate", async message => {
-  if (!message.content.startsWith("!")) return;
+  if (message.author.bot) return;
 
   if (message.content === "!x1") criarPartida(message, "x1", 2);
   if (message.content === "!x2") criarPartida(message, "x2", 4);
