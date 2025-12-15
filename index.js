@@ -1,86 +1,80 @@
-const {
-  Client,
-  GatewayIntentBits,
-  ChannelType,
-  PermissionsBitField
+const { 
+  Client, 
+  GatewayIntentBits, 
+  ChannelType, 
+  PermissionsBitField 
 } = require("discord.js");
-const QRCode = require("qrcode");
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.MessageContent
   ]
 });
 
-// ===== CONFIGURAÇÕES =====
-const PIX_CHAVE = process.env.PIX_CHAVE;
-
-// valores por modo
-const VALORES = {
-  x1: "10.00",
-  x2: "20.00",
-  x4: "40.00"
-};
-// ========================
-
 client.once("ready", () => {
-  console.log("💰 Bot auxiliar de pagamento ONLINE");
+  console.log(`Bot online como ${client.user.tag}`);
 });
 
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (!message.guild) return;
+async function criarPartida(message, tipo, limite) {
+  const guild = message.guild;
 
-  const comando = message.content.toLowerCase();
-
-  if (!["!x1", "!x2", "!x4"].includes(comando)) return;
-
-  const tipo = comando.replace("!", ""); // x1, x2, x4
-  const valor = VALORES[tipo];
-
-  // cria canal provisório
-  const canalPagamento = await message.guild.channels.create({
-    name: `💰-pagamento-${tipo}`,
-    type: ChannelType.GuildText,
-    permissionOverwrites: [
-      {
-        id: message.guild.id,
-        deny: [PermissionsBitField.Flags.ViewChannel]
-      },
-      {
-        id: message.author.id,
-        allow: [PermissionsBitField.Flags.ViewChannel]
-      }
-    ]
+  const canalTexto = await guild.channels.create({
+    name: `${tipo}-aposta`,
+    type: ChannelType.GuildText
   });
 
-  // payload Pix SIMPLES (funciona, mas manual)
-  const payloadPix = `00020126580014BR.GOV.BCB.PIX0136${PIX_CHAVE}5204000053039865405${valor.replace(
-    ".",
-    ""
-  )}5802BR5909APOSTA6009BRASIL62070503***6304`;
-
-  const qrCode = await QRCode.toDataURL(payloadPix);
-
-  await canalPagamento.send({
-    content: `💸 **Pagamento ${tipo.toUpperCase()}**  
-Valor: **R$ ${valor}**
-
-Escaneie o QR Code abaixo para pagar 👇`,
-    files: [
-      {
-        attachment: Buffer.from(qrCode.split(",")[1], "base64"),
-        name: "pix.png"
-      }
-    ]
+  const canalVoz = await guild.channels.create({
+    name: `${tipo.toUpperCase()} | Partida`,
+    type: ChannelType.GuildVoice
   });
 
-  // opcional: aviso no canal original
-  await message.reply(
-    `✅ Canal de pagamento criado: ${canalPagamento}`
+  await canalTexto.send(
+    `🎮 **${tipo.toUpperCase()} criada!**\n` +
+    `👥 Limite: ${limite} jogadores\n` +
+    `Entre em um canal de voz para ser movido automaticamente.`
   );
+
+  const membros = [];
+
+  const coletor = canalTexto.createMessageCollector({ time: 600000 });
+
+  coletor.on("collect", async msg => {
+    if (msg.content === "!entrar" && msg.member.voice.channel) {
+      if (!membros.includes(msg.member.id)) {
+        membros.push(msg.member.id);
+        await msg.reply(`✅ Entrou (${membros.length}/${limite})`);
+      }
+
+      if (membros.length === limite) {
+        coletor.stop();
+        for (const id of membros) {
+          const membro = await guild.members.fetch(id);
+          if (membro.voice.channel) {
+            membro.voice.setChannel(canalVoz);
+          }
+        }
+        await canalTexto.send("🚨 Partida fechada!");
+      }
+    }
+  });
+
+  coletor.on("end", async () => {
+    setTimeout(async () => {
+      await canalTexto.delete();
+      await canalVoz.delete();
+    }, 300000);
+  });
+}
+
+client.on("messageCreate", async message => {
+  if (!message.content.startsWith("!")) return;
+
+  if (message.content === "!x1") criarPartida(message, "x1", 2);
+  if (message.content === "!x2") criarPartida(message, "x2", 4);
+  if (message.content === "!x4") criarPartida(message, "x4", 8);
 });
 
 client.login(process.env.TOKEN);
